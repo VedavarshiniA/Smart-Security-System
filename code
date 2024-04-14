@@ -1,0 +1,156 @@
+#include <WiFi.h>
+#include <WebServer.h>
+#include <DHT.h>
+#include <Adafruit_SSD1306.h>
+
+// Define DHT sensor pin and type
+#define DHTPIN 4       
+#define DHTTYPE DHT11  
+
+int _moisture, sensor_analog;  // Variables to store soil moisture and sensor analog value
+
+// WiFi AP credentials
+const char *ssid = "Agriculture";
+const char *password = "password123";
+
+// Define PIR sensor pin and OLED display settings
+#define PIR_PIN   14 
+#define OLED_SDA 21
+#define OLED_SCL 22
+#define OLED_WIDTH 128
+#define OLED_HEIGHT 32
+
+// Initialize DHT sensor, OLED display, and WebServer
+DHT dht(DHTPIN, DHTTYPE);
+Adafruit_SSD1306 display(OLED_WIDTH, OLED_HEIGHT, &Wire, -1);
+WebServer server(80);
+
+// Define pins for soil and rain sensors
+int sensor_pin = 34;
+int rainSensorPin = 35;
+int soilMoisture = 0;
+int rainSensor = 0;
+
+// Handle root endpoint request
+void handleRoot() {
+  // Read temperature, humidity, and PIR sensor state
+  float temperature = dht.readTemperature();
+  float humidity = dht.readHumidity();
+  int pirState = digitalRead(PIR_PIN);
+  
+  // Generate HTML webpage with sensor readings
+  String webpage = "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"><title>ESP32 Sensor Readings</title>";
+  // Add CSS styles to the webpage
+  webpage += "<style>";
+  // ... (CSS styles)
+  webpage += "</style>";
+  // JavaScript for auto-refresh every 3 seconds
+  webpage += "<script>setTimeout(function(){location.reload();}, 3000);</script>";
+  webpage += "</head><body>";
+  // Create sensor readings section on the webpage
+  webpage += "<ul class=\"scifiUI\">";
+  webpage += "  <li>";
+  webpage += "    <input type=\"radio\" name=\"tab\" id=\"tab1\" checked>";
+  webpage += "    <label for=\"tab1\">Sensor Readings</label>";
+  webpage += "    <div class=\"blurred-box section\">";
+  // Display temperature and humidity readings
+  webpage += "<h2>Temperature: " + String(temperature) + " °C</h2>";
+  webpage += "<h2>Humidity: " + String(humidity) + " %</h2>";
+  // Check if rain and motion are detected
+  if (rainSensor == LOW) {
+    webpage += "<h2>Rain Detected: Yes</h2>";
+  } else {
+    webpage += "<h2>Rain Detected: No</h3>";
+  }
+  if (pirState == HIGH) {
+    webpage += "<h2>Motion Detected: Yes</h2>";
+  } else {
+    webpage += "<h2>Motion Detected: No</h2>";
+  }
+  webpage += "    </div>";
+  webpage += "  </li>";
+  webpage += "</ul>";
+  webpage += "</body></html>";
+  // Send webpage as response to client
+  server.send(200, "text/html", webpage);
+}
+void setup() {
+  // Initialize serial communication
+  Serial.begin(115200);
+  // Initialize I2C communication for OLED display
+  Wire.begin(OLED_SDA, OLED_SCL);
+
+  // Initialize OLED display
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println(F("SSD1306 allocation failed"));
+    while (1);
+  }
+  // Initialize DHT sensor
+  dht.begin();
+
+  // Set pin modes for PIR sensor and LED
+  pinMode(PIR_PIN, INPUT);
+  pinMode(18, OUTPUT);
+
+  // Set up WiFi AP
+  WiFi.softAP(ssid, password);
+  IPAddress IP = WiFi.softAPIP();
+  Serial.println("AP IP address: " + IP.toString());
+
+  // Configure pin modes for soil and rain sensors
+  pinMode(sensor_pin, INPUT);
+  pinMode(rainSensorPin, INPUT);
+
+  // Define web server route for root endpoint
+  server.on("/", handleRoot);
+
+  // Start web server
+  server.begin();
+}
+
+// Function to generate beep sound
+void beep(){
+  digitalWrite(18, HIGH);
+  delay(3000);
+  digitalWrite(18, LOW);
+}
+void loop() {
+  // Read temperature and humidity from DHT sensor
+  float temperature = dht.readTemperature();
+  float humidity = dht.readHumidity();
+
+  // Read soil moisture and rain sensor values
+  sensor_analog = analogRead(sensor_pin);
+  _moisture = ( 100 - ( (sensor_analog / 4095.00) * 100 ) );
+
+  // Read PIR sensor state
+  int pirState = digitalRead(PIR_PIN);
+
+  // Clear OLED display
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  
+  // Display temperature and humidity on OLED
+  display.println("Temperature: " + String(temperature) + " C");
+  display.println("Humidity: " + String(humidity) + " %");
+
+  // Display rain and motion detection status on OLED
+  if (rainSensor == LOW) {
+    display.println("Rain Detected: Yes");
+    beep();
+  } else {
+    display.println("Rain Detected: No");
+  }
+  if (pirState == HIGH) {
+    display.println("Motion Detected: Yes");
+  } else {
+    display.println("Motion Detected: No");
+  }
+
+  // Update OLED display
+  display.display();
+  // Handle web server client requests
+  server.handleClient();
+}
